@@ -1,0 +1,221 @@
+# RAG (Retrieval-Augmented Generation) Configuration
+# Dissertation: Entity Extraction in Long Legal Documents
+
+# Inherits from base_config.yaml
+base_config: "base_config.yaml"
+
+# =============================================================================
+# RAG APPROACH SETTINGS
+# =============================================================================
+rag:
+  enabled: true
+  name: "RAG Entity Extractor"
+
+  # ---------------------------------------------------------------------------
+  # CHUNKING STRATEGIES
+  # ---------------------------------------------------------------------------
+  chunking:
+    # Strategy to use: "semantic", "section", "sliding_window", "recursive"
+    strategy: "semantic"
+
+    strategies:
+      semantic:
+        # Uses sentence boundaries and semantic coherence
+        min_chunk_size: 256
+        max_chunk_size: 1024
+        similarity_threshold: 0.7
+        respect_sentences: true
+
+      section:
+        # Splits by document sections (clauses, articles)
+        section_patterns:
+          - "^\\d+\\.\\s+"
+          - "^CLÁUSULA\\s+\\w+"
+          - "^ARTIGO\\s+\\w+"
+          - "^[IVX]+\\s*[-.]"
+        min_section_size: 128
+        max_section_size: 2048
+        merge_small_sections: true
+
+      sliding_window:
+        # Fixed-size chunks with overlap
+        chunk_size: 512
+        overlap: 128
+        overlap_ratio: 0.25  # Alternative: 25% overlap
+
+      recursive:
+        # LangChain-style recursive splitting
+        chunk_size: 1000
+        chunk_overlap: 200
+        separators:
+          - "\n\n"
+          - "\n"
+          - ". "
+          - " "
+          - ""
+
+  # ---------------------------------------------------------------------------
+  # EMBEDDING MODELS
+  # ---------------------------------------------------------------------------
+  embeddings:
+    # Model to use: "openai", "legal_bert", "multilingual", "bge"
+    model: "openai"
+
+    models:
+      openai:
+        model_name: "text-embedding-3-large"
+        dimensions: 3072
+        batch_size: 100
+        max_retries: 3
+
+      legal_bert:
+        # Legal-domain specific embeddings
+        model_name: "nlpaueb/legal-bert-base-uncased"
+        dimensions: 768
+        max_length: 512
+        pooling: "mean"
+
+      multilingual:
+        # For Portuguese documents
+        model_name: "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+        dimensions: 768
+        max_length: 512
+
+      bge:
+        # BGE embeddings (strong performance)
+        model_name: "BAAI/bge-large-en-v1.5"
+        dimensions: 1024
+        max_length: 512
+        instruction: "Represent this legal document clause for retrieval:"
+
+      e5:
+        # E5 embeddings
+        model_name: "intfloat/multilingual-e5-large"
+        dimensions: 1024
+        max_length: 512
+        instruction: "query: "
+
+  # ---------------------------------------------------------------------------
+  # VECTOR STORE
+  # ---------------------------------------------------------------------------
+  vector_store:
+    # Backend: "faiss", "chroma", "pinecone", "weaviate"
+    backend: "faiss"
+
+    backends:
+      faiss:
+        index_type: "IVFFlat"  # or "HNSW", "Flat"
+        nlist: 100  # Number of clusters for IVF
+        nprobe: 10  # Number of clusters to search
+
+      chroma:
+        collection_name: "legal_contracts"
+        persist_directory: "../checkpoints/chroma_db"
+
+  # ---------------------------------------------------------------------------
+  # RETRIEVAL SETTINGS
+  # ---------------------------------------------------------------------------
+  retrieval:
+    # Strategy: "dense", "sparse", "hybrid"
+    strategy: "hybrid"
+
+    strategies:
+      dense:
+        # Pure semantic similarity
+        top_k: 10
+        similarity_metric: "cosine"  # or "l2", "dot"
+        min_similarity: 0.3
+
+      sparse:
+        # BM25/TF-IDF based
+        algorithm: "bm25"
+        top_k: 10
+        k1: 1.5  # BM25 term frequency saturation
+        b: 0.75  # BM25 document length normalization
+
+      hybrid:
+        # Combines dense and sparse
+        dense_weight: 0.7
+        sparse_weight: 0.3
+        top_k: 15
+        reranking: true
+
+    # Re-ranking (optional)
+    reranking:
+      enabled: true
+      model: "cross-encoder/ms-marco-MiniLM-L-12-v2"
+      top_k: 5  # Final number after reranking
+
+  # ---------------------------------------------------------------------------
+  # GENERATION (LLM for final extraction)
+  # ---------------------------------------------------------------------------
+  generation:
+    # Model for generating extractions from retrieved chunks
+    provider: "openai"
+    model: "gpt-4o"
+
+    parameters:
+      temperature: 0.0
+      max_tokens: 2048
+      top_p: 1.0
+
+    # Prompt template
+    prompt_template: |
+      You are an expert legal document analyst specializing in contract entity extraction.
+
+      Given the following context from a legal contract, extract the specified entities.
+
+      CONTEXT:
+      {context}
+
+      ENTITY TYPES TO EXTRACT:
+      {entity_types}
+
+      INSTRUCTIONS:
+      1. Extract only entities that are explicitly mentioned in the context
+      2. For each entity, provide the exact text as it appears in the document
+      3. If an entity is not found, indicate "NOT_FOUND"
+      4. Be precise - extract the complete entity value without truncation
+
+      OUTPUT FORMAT (JSON):
+      {{
+        "entities": [
+          {{"type": "ENTITY_TYPE", "value": "extracted text", "confidence": 0.95}}
+        ]
+      }}
+
+      EXTRACTED ENTITIES:
+
+# =============================================================================
+# EXPERIMENT VARIANTS (for ablation studies)
+# =============================================================================
+ablation:
+  chunking_strategies:
+    - "semantic"
+    - "section"
+    - "sliding_window"
+    - "recursive"
+
+  embedding_models:
+    - "openai"
+    - "legal_bert"
+    - "multilingual"
+    - "bge"
+
+  retrieval_strategies:
+    - "dense"
+    - "sparse"
+    - "hybrid"
+
+  top_k_values:
+    - 3
+    - 5
+    - 10
+    - 15
+    - 20
+
+  chunk_sizes:
+    - 256
+    - 512
+    - 1024
+    - 2048

@@ -1,0 +1,163 @@
+# Base Configuration for Entity Extraction Experiments
+# Dissertation: Entity Extraction in Long Legal Documents
+
+# =============================================================================
+# EXPERIMENT SETTINGS
+# =============================================================================
+experiment:
+  name: "entity_extraction_long_documents"
+  version: "1.0.0"
+  seed: 42
+  debug: false
+
+# =============================================================================
+# DATA SETTINGS
+# =============================================================================
+data:
+  datasets:
+    cuad:
+      path: "../data/cuad"
+      language: "en"
+      description: "Contract Understanding Atticus Dataset"
+      splits:
+        train: "train.json"
+        validation: "val.json"
+        test: "test.json"
+
+    di2win:
+      path: "../data/di2win"
+      language: "pt-br"
+      description: "Brazilian Legal Contracts Dataset"
+      splits:
+        train: "train.json"
+        validation: "val.json"
+        test: "test.json"
+
+  # Entity types to extract
+  entity_types:
+    cuad:
+      - "Party"
+      - "Date"
+      - "Term"
+      - "Governing Law"
+      - "Jurisdiction"
+      - "Termination Clause"
+      - "Renewal Term"
+      - "Notice Period"
+      - "Non-Compete Term"
+      - "Exclusivity"
+
+    di2win:
+      - "CONTRATANTE"
+      - "CONTRATADA"
+      - "CNPJ_CONTRATANTE"
+      - "CNPJ_CONTRATADA"
+      - "DATA_CONTRATO"
+      - "VALOR_CONTRATO"
+      - "PRAZO_VIGENCIA"
+      - "OBJETO_CONTRATO"
+      - "FORO"
+
+# =============================================================================
+# PREPROCESSING
+# =============================================================================
+preprocessing:
+  # Text normalization
+  normalize_whitespace: true
+  remove_headers_footers: true
+  preserve_structure: true
+
+  # Document segmentation
+  section_detection:
+    enabled: true
+    patterns:
+      - "^\\d+\\.\\s+"           # Numbered sections
+      - "^[A-Z][A-Z\\s]+:$"     # All-caps headers
+      - "^CLÁUSULA\\s+\\w+"     # Portuguese clause headers
+
+  # Length limits
+  max_document_length: 500000  # characters
+
+# =============================================================================
+# OUTPUT SETTINGS
+# =============================================================================
+output:
+  results_dir: "../results"
+  checkpoints_dir: "../checkpoints"
+  logs_dir: "../logs"
+
+  # Result formats
+  formats:
+    - "json"
+    - "csv"
+
+  # Logging
+  logging:
+    level: "INFO"
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    file: true
+    console: true
+
+# =============================================================================
+# EVALUATION SETTINGS
+# =============================================================================
+evaluation:
+  metrics:
+    - "exact_match"
+    - "partial_match"
+    - "entity_type_f1"
+    - "coverage"
+    - "consistency"
+
+  # Partial match settings
+  partial_match:
+    threshold: 0.5  # Minimum token overlap ratio
+
+  # Cross-validation
+  cross_validation:
+    enabled: false
+    folds: 5
+
+  # Statistical tests
+  statistical_tests:
+    - "paired_t_test"
+    - "wilcoxon"
+    - "bootstrap_ci"
+
+# =============================================================================
+# COST TRACKING
+# =============================================================================
+cost_tracking:
+  enabled: true
+  currency: "USD"
+
+  # API costs (per 1M tokens)
+  api_costs:
+    openai:
+      gpt-4-turbo:
+        input: 10.0
+        output: 30.0
+      gpt-4o:
+        input: 5.0
+        output: 15.0
+      text-embedding-3-large:
+        input: 0.13
+
+    anthropic:
+      claude-3-opus:
+        input: 15.0
+        output: 75.0
+      claude-3-sonnet:
+        input: 3.0
+        output: 15.0
+      claude-3-haiku:
+        input: 0.25
+        output: 1.25
+
+    google:
+      gemini-1.5-pro:
+        input: 3.5
+        output: 10.5
+      gemini-1.5-flash:
+        input: 0.35
+        output: 1.05

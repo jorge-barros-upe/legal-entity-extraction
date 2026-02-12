@@ -1,0 +1,273 @@
+# LLM (Long-Context Language Models) Configuration
+# Dissertation: Entity Extraction in Long Legal Documents
+
+# Inherits from base_config.yaml
+base_config: "base_config.yaml"
+
+# =============================================================================
+# LLM APPROACH SETTINGS
+# =============================================================================
+llm:
+  enabled: true
+  name: "Long-Context LLM Entity Extractor"
+
+  # ---------------------------------------------------------------------------
+  # MODEL PROVIDERS
+  # ---------------------------------------------------------------------------
+  providers:
+    # Azure OpenAI - PRIMARY (usando sua configuração)
+    azure_openai:
+      api_key_env: "AZURE_OPENAI_API_KEY"
+      endpoint_env: "AZURE_OPENAI_ENDPOINT"
+      api_version: "2024-06-01"
+      models:
+        gpt-4-turbo:
+          deployment_name: "gpt-4-turbo"  # Nome do deployment no Azure
+          context_window: 128000
+          max_output_tokens: 4096
+          supports_json_mode: true
+
+    # OpenAI Direct (se precisar)
+    openai:
+      api_key_env: "OPENAI_API_KEY"
+      models:
+        gpt-4-turbo:
+          model_id: "gpt-4-turbo-preview"
+          context_window: 128000
+          max_output_tokens: 4096
+          supports_json_mode: true
+
+        gpt-4o:
+          model_id: "gpt-4o"
+          context_window: 128000
+          max_output_tokens: 16384
+          supports_json_mode: true
+
+    # Anthropic Claude
+    anthropic:
+      api_key_env: "ANTHROPIC_API_KEY"
+      models:
+        claude-3-opus:
+          model_id: "claude-3-opus-20240229"
+          context_window: 200000
+          max_output_tokens: 4096
+          supports_json_mode: false
+
+        claude-3-sonnet:
+          model_id: "claude-3-5-sonnet-20241022"
+          context_window: 200000
+          max_output_tokens: 8192
+          supports_json_mode: false
+
+    # Google Gemini (usando sua API key)
+    google:
+      api_key_env: "GOOGLE_API_KEY"
+      models:
+        gemini-2.0-flash:
+          model_id: "gemini-2.0-flash"
+          context_window: 1000000  # 1M tokens!
+          max_output_tokens: 8192
+          supports_json_mode: true
+
+        gemini-1.5-pro:
+          model_id: "gemini-1.5-pro"
+          context_window: 1000000
+          max_output_tokens: 8192
+          supports_json_mode: true
+
+  # ---------------------------------------------------------------------------
+  # DEFAULT SETTINGS - Usando Azure OpenAI
+  # ---------------------------------------------------------------------------
+  default:
+    provider: "azure_openai"  # Alterado para Azure
+    model: "gpt-4-turbo"
+    temperature: 0.0
+    max_retries: 3
+    retry_delay: 5  # seconds
+    timeout: 120  # seconds
+
+  # ---------------------------------------------------------------------------
+  # PROMPTING STRATEGIES
+  # ---------------------------------------------------------------------------
+  prompting:
+    # Strategy to use: "zero_shot", "few_shot", "chain_of_thought", "self_consistency"
+    strategy: "few_shot"
+
+    strategies:
+      zero_shot:
+        system_prompt: |
+          You are an expert legal document analyst specializing in extracting specific entities from contracts.
+          You must extract entities precisely as they appear in the document.
+          Always respond in valid JSON format.
+
+        user_template: |
+          Extract the following entity types from this legal contract:
+          {entity_types}
+
+          CONTRACT TEXT:
+          {document}
+
+          OUTPUT FORMAT:
+          Return a JSON object with the following structure:
+          {{
+            "entities": [
+              {{"type": "ENTITY_TYPE", "value": "exact text from document", "location": "section or context"}}
+            ]
+          }}
+
+      few_shot:
+        system_prompt: |
+          You are an expert legal document analyst. Your task is to extract specific entities from contracts.
+          Learn from the examples provided and apply the same extraction patterns.
+
+        examples:
+          - input: |
+              Contract between ABC Corporation ("Buyer") and XYZ Inc. ("Seller")
+              dated January 15, 2024. This agreement shall be governed by the laws
+              of the State of Delaware.
+            output: |
+              {{
+                "entities": [
+                  {{"type": "Party", "value": "ABC Corporation", "role": "Buyer"}},
+                  {{"type": "Party", "value": "XYZ Inc.", "role": "Seller"}},
+                  {{"type": "Date", "value": "January 15, 2024"}},
+                  {{"type": "Governing Law", "value": "laws of the State of Delaware"}}
+                ]
+              }}
+
+          - input: |
+              CONTRATO DE PRESTAÇÃO DE SERVIÇOS celebrado entre EMPRESA ALPHA LTDA,
+              inscrita no CNPJ sob nº 12.345.678/0001-90, e BETA TECNOLOGIA S.A.,
+              CNPJ 98.765.432/0001-10, com vigência de 12 meses a partir de 01/03/2024.
+            output: |
+              {{
+                "entities": [
+                  {{"type": "CONTRATANTE", "value": "EMPRESA ALPHA LTDA"}},
+                  {{"type": "CNPJ_CONTRATANTE", "value": "12.345.678/0001-90"}},
+                  {{"type": "CONTRATADA", "value": "BETA TECNOLOGIA S.A."}},
+                  {{"type": "CNPJ_CONTRATADA", "value": "98.765.432/0001-10"}},
+                  {{"type": "PRAZO_VIGENCIA", "value": "12 meses"}},
+                  {{"type": "DATA_CONTRATO", "value": "01/03/2024"}}
+                ]
+              }}
+
+        num_examples: 3  # Number of examples to include
+
+        user_template: |
+          Based on the examples above, extract the following entities from this contract:
+          {entity_types}
+
+          CONTRACT:
+          {document}
+
+          EXTRACTED ENTITIES (JSON):
+
+      chain_of_thought:
+        system_prompt: |
+          You are an expert legal document analyst. Think step-by-step when extracting entities.
+
+        user_template: |
+          Extract the following entities from this legal contract: {entity_types}
+
+          CONTRACT TEXT:
+          {document}
+
+          INSTRUCTIONS:
+          1. First, identify the main sections of the contract
+          2. For each entity type, scan the relevant sections
+          3. Extract the exact text that matches each entity
+          4. Verify each extraction is complete and accurate
+          5. Format your final answer as JSON
+
+          Let's work through this step by step:
+
+      self_consistency:
+        # Run multiple extractions and take majority vote
+        num_samples: 3
+        temperature: 0.7
+        aggregation: "majority_vote"
+
+  # ---------------------------------------------------------------------------
+  # DOCUMENT HANDLING FOR LONG DOCUMENTS
+  # ---------------------------------------------------------------------------
+  document_handling:
+    # How to handle documents that exceed context window
+    strategy: "hierarchical"  # "truncate", "chunk_aggregate", "hierarchical"
+
+    strategies:
+      truncate:
+        # Simple truncation (not recommended)
+        keep: "start"  # "start", "end", "both"
+        preserve_structure: true
+
+      chunk_aggregate:
+        # Process in chunks, then aggregate
+        chunk_size: 50000  # tokens
+        overlap: 1000
+        aggregation: "merge"  # "merge", "vote"
+
+      hierarchical:
+        # Multi-pass: summary → sections → detailed
+        first_pass:
+          instruction: "Identify sections containing relevant entities"
+          max_tokens: 100000
+
+        second_pass:
+          instruction: "Extract entities from identified sections"
+          max_tokens: 50000
+
+  # ---------------------------------------------------------------------------
+  # RATE LIMITING
+  # ---------------------------------------------------------------------------
+  rate_limiting:
+    enabled: true
+
+    limits:
+      azure_openai:
+        requests_per_minute: 60
+        tokens_per_minute: 150000
+
+      openai:
+        requests_per_minute: 60
+        tokens_per_minute: 150000
+
+      anthropic:
+        requests_per_minute: 50
+        tokens_per_minute: 100000
+
+      google:
+        requests_per_minute: 60
+        tokens_per_minute: 200000
+
+# =============================================================================
+# EXPERIMENT VARIANTS (for ablation studies)
+# =============================================================================
+ablation:
+  models:
+    # Azure OpenAI (primary)
+    - provider: "azure_openai"
+      model: "gpt-4-turbo"
+
+    # Google Gemini
+    - provider: "google"
+      model: "gemini-2.0-flash"
+
+    # Anthropic (se tiver API key)
+    # - provider: "anthropic"
+    #   model: "claude-3-sonnet"
+
+  prompting_strategies:
+    - "zero_shot"
+    - "few_shot"
+    - "chain_of_thought"
+    - "self_consistency"
+
+  temperatures:
+    - 0.0
+    - 0.3
+    - 0.7
+
+  num_few_shot_examples:
+    - 1
+    - 3
+    - 5

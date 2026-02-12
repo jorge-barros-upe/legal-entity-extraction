@@ -1,0 +1,281 @@
+# SLM (Small Language Models) Configuration
+# Dissertation: Entity Extraction in Long Legal Documents
+
+# Inherits from base_config.yaml
+base_config: "base_config.yaml"
+
+# =============================================================================
+# SLM APPROACH SETTINGS
+# =============================================================================
+slm:
+  enabled: true
+  name: "Fine-tuned SLM Entity Extractor"
+
+  # ---------------------------------------------------------------------------
+  # MODEL ARCHITECTURES
+  # ---------------------------------------------------------------------------
+  architectures:
+    # Long-document architectures (sparse attention)
+    longformer:
+      model_name: "allenai/longformer-base-4096"
+      max_length: 4096
+      attention_window: 512
+      global_attention_on_cls: true
+      description: "Sparse attention for long documents"
+
+    bigbird:
+      model_name: "google/bigbird-roberta-base"
+      max_length: 4096
+      attention_type: "block_sparse"
+      block_size: 64
+      num_random_blocks: 3
+      description: "Block-sparse attention pattern"
+
+    led:
+      model_name: "allenai/led-base-16384"
+      max_length: 16384
+      attention_window: 1024
+      encoder_decoder: true
+      description: "Longformer Encoder-Decoder for seq2seq"
+
+    # Domain-specific models
+    legal_bert:
+      model_name: "nlpaueb/legal-bert-base-uncased"
+      max_length: 512
+      domain: "legal"
+      language: "en"
+      description: "Pre-trained on legal documents"
+
+    legal_bertimbau:
+      model_name: "rufimelo/Legal-BERTimbau-base"
+      max_length: 512
+      domain: "legal"
+      language: "pt"
+      description: "Portuguese legal BERT"
+
+    bertimbau:
+      model_name: "neuralmind/bert-base-portuguese-cased"
+      max_length: 512
+      domain: "general"
+      language: "pt"
+      description: "Portuguese BERT"
+
+    # Efficient fine-tuning targets
+    mistral_7b:
+      model_name: "mistralai/Mistral-7B-v0.1"
+      max_length: 8192
+      use_flash_attention: true
+      description: "Strong 7B model for fine-tuning"
+
+    llama3_8b:
+      model_name: "meta-llama/Meta-Llama-3-8B"
+      max_length: 8192
+      use_flash_attention: true
+      description: "Meta's latest 8B model"
+
+    phi3_mini:
+      model_name: "microsoft/Phi-3-mini-4k-instruct"
+      max_length: 4096
+      description: "Efficient small model"
+
+  # ---------------------------------------------------------------------------
+  # DEFAULT MODEL
+  # ---------------------------------------------------------------------------
+  default:
+    architecture: "legal_bert"
+    task: "token_classification"  # or "sequence_labeling", "seq2seq"
+
+  # ---------------------------------------------------------------------------
+  # TRAINING CONFIGURATION
+  # ---------------------------------------------------------------------------
+  training:
+    # Task formulation
+    task_type: "token_classification"  # NER-style
+
+    # Basic training parameters
+    batch_size: 8
+    gradient_accumulation_steps: 4
+    learning_rate: 2e-5
+    weight_decay: 0.01
+    num_epochs: 10
+    warmup_ratio: 0.1
+    max_grad_norm: 1.0
+
+    # Optimizer
+    optimizer: "adamw"
+    scheduler: "linear"  # or "cosine", "constant"
+
+    # Mixed precision
+    fp16: true
+    bf16: false  # Use if supported by hardware
+
+    # Evaluation during training
+    eval_strategy: "steps"
+    eval_steps: 500
+    save_strategy: "steps"
+    save_steps: 500
+    save_total_limit: 3
+
+    # Early stopping
+    early_stopping:
+      enabled: true
+      patience: 3
+      metric: "eval_f1"
+      greater_is_better: true
+
+    # Label smoothing
+    label_smoothing: 0.0
+
+  # ---------------------------------------------------------------------------
+  # FINE-TUNING METHODS
+  # ---------------------------------------------------------------------------
+  fine_tuning:
+    # Method: "full", "lora", "qlora", "adapter"
+    method: "lora"
+
+    methods:
+      full:
+        # Full fine-tuning (all parameters)
+        freeze_embeddings: false
+        freeze_layers: 0  # Number of layers to freeze from bottom
+
+      lora:
+        # Low-Rank Adaptation
+        r: 16  # Rank
+        lora_alpha: 32
+        lora_dropout: 0.1
+        target_modules:
+          - "q_proj"
+          - "v_proj"
+          - "k_proj"
+          - "o_proj"
+        bias: "none"
+
+      qlora:
+        # Quantized LoRA
+        r: 16
+        lora_alpha: 32
+        lora_dropout: 0.1
+        quantization_bits: 4
+        double_quantization: true
+        quantization_type: "nf4"  # or "fp4"
+        target_modules:
+          - "q_proj"
+          - "v_proj"
+          - "k_proj"
+          - "o_proj"
+
+      adapter:
+        # Adapter layers
+        adapter_size: 64
+        adapter_act: "relu"
+        adapter_init_range: 1e-2
+
+  # ---------------------------------------------------------------------------
+  # NER LABEL SCHEME
+  # ---------------------------------------------------------------------------
+  labeling:
+    scheme: "BIO"  # or "BIOES", "IO"
+
+    # BIO scheme
+    bio:
+      outside: "O"
+      begin_prefix: "B-"
+      inside_prefix: "I-"
+
+    # BIOES scheme
+    bioes:
+      outside: "O"
+      begin_prefix: "B-"
+      inside_prefix: "I-"
+      end_prefix: "E-"
+      single_prefix: "S-"
+
+  # ---------------------------------------------------------------------------
+  # DATA AUGMENTATION
+  # ---------------------------------------------------------------------------
+  augmentation:
+    enabled: true
+
+    techniques:
+      synonym_replacement:
+        enabled: true
+        probability: 0.1
+
+      entity_replacement:
+        enabled: true
+        probability: 0.15
+        # Replace entities with similar ones from corpus
+
+      back_translation:
+        enabled: false
+        languages: ["es", "fr"]
+
+      noise_injection:
+        enabled: false
+        probability: 0.05
+        types: ["typo", "ocr_error"]
+
+  # ---------------------------------------------------------------------------
+  # LONG DOCUMENT HANDLING
+  # ---------------------------------------------------------------------------
+  long_document:
+    # Strategy: "sliding_window", "hierarchical", "truncate"
+    strategy: "sliding_window"
+
+    sliding_window:
+      window_size: 512
+      stride: 256
+      aggregation: "max"  # "max", "mean", "vote"
+
+    hierarchical:
+      # First pass: identify relevant sections
+      # Second pass: detailed extraction
+      section_model: "legal_bert"
+      extraction_model: "longformer"
+
+# =============================================================================
+# EXPERIMENT VARIANTS (for ablation studies)
+# =============================================================================
+ablation:
+  architectures:
+    - "legal_bert"
+    - "longformer"
+    - "bigbird"
+    - "legal_bertimbau"
+
+  fine_tuning_methods:
+    - "full"
+    - "lora"
+    - "qlora"
+
+  learning_rates:
+    - 1e-5
+    - 2e-5
+    - 5e-5
+
+  batch_sizes:
+    - 4
+    - 8
+    - 16
+
+  max_lengths:
+    - 512
+    - 1024
+    - 2048
+    - 4096
+
+  lora_ranks:
+    - 4
+    - 8
+    - 16
+    - 32
+
+  augmentation:
+    - enabled: false
+    - enabled: true
+      techniques: ["synonym_replacement"]
+    - enabled: true
+      techniques: ["entity_replacement"]
+    - enabled: true
+      techniques: ["synonym_replacement", "entity_replacement"]

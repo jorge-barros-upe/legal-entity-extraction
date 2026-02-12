@@ -1,0 +1,293 @@
+# Hybrid Approaches Configuration
+# Dissertation: Entity Extraction in Long Legal Documents
+
+# Inherits from base_config.yaml
+base_config: "base_config.yaml"
+
+# =============================================================================
+# HYBRID APPROACH SETTINGS
+# =============================================================================
+hybrid:
+  enabled: true
+  name: "Hybrid Entity Extraction Approaches"
+
+  # ---------------------------------------------------------------------------
+  # APPROACH 1: RAG + LLM VALIDATION
+  # ---------------------------------------------------------------------------
+  rag_llm_validation:
+    enabled: true
+    name: "RAG with LLM Validation"
+    description: |
+      Two-stage approach:
+      1. RAG extracts candidate entities from retrieved chunks
+      2. LLM validates and refines extractions using broader context
+
+    stages:
+      extraction:
+        # RAG configuration for initial extraction
+        use_config: "rag_config.yaml"
+        overrides:
+          retrieval:
+            top_k: 15  # Retrieve more for broader coverage
+          generation:
+            temperature: 0.0
+
+      validation:
+        # LLM configuration for validation
+        provider: "anthropic"
+        model: "claude-3-sonnet"
+
+        prompt_template: |
+          You are validating entity extractions from a legal contract.
+
+          EXTRACTED ENTITIES (candidates):
+          {candidates}
+
+          RELEVANT CONTEXT:
+          {context}
+
+          FULL DOCUMENT EXCERPT:
+          {document_excerpt}
+
+          For each candidate entity, determine:
+          1. Is this extraction correct? (yes/no)
+          2. If incorrect, what is the correct value?
+          3. Are there any missing entities of these types?
+
+          Validation criteria:
+          - Entity must be complete (not truncated)
+          - Entity must match the specified type
+          - Entity must be from the actual document (not hallucinated)
+
+          OUTPUT (JSON):
+          {{
+            "validated_entities": [...],
+            "corrected_entities": [...],
+            "missing_entities": [...],
+            "confidence_scores": {{}}
+          }}
+
+    aggregation:
+      # How to combine results
+      method: "confidence_weighted"
+      min_confidence: 0.7
+      require_validation: true
+
+  # ---------------------------------------------------------------------------
+  # APPROACH 2: ENSEMBLE OF SPECIALIZED SLMs
+  # ---------------------------------------------------------------------------
+  ensemble_slm:
+    enabled: true
+    name: "Ensemble of Specialized SLMs"
+    description: |
+      Multiple SLMs specialized for different entity types or document sections.
+      Results are aggregated using voting or confidence-based fusion.
+
+    # Specialized models
+    models:
+      party_extractor:
+        base_model: "legal_bert"
+        entity_types: ["Party", "CONTRATANTE", "CONTRATADA"]
+        checkpoint: "checkpoints/party_slm"
+        weight: 1.0
+
+      date_extractor:
+        base_model: "legal_bert"
+        entity_types: ["Date", "DATA_CONTRATO", "PRAZO_VIGENCIA"]
+        checkpoint: "checkpoints/date_slm"
+        weight: 1.0
+
+      identifier_extractor:
+        base_model: "legal_bert"
+        entity_types: ["CNPJ_CONTRATANTE", "CNPJ_CONTRATADA"]
+        checkpoint: "checkpoints/id_slm"
+        weight: 1.0
+
+      clause_extractor:
+        base_model: "longformer"  # Longer context for clauses
+        entity_types: ["Governing Law", "Termination Clause", "OBJETO_CONTRATO"]
+        checkpoint: "checkpoints/clause_slm"
+        weight: 1.2  # Higher weight for complex entities
+
+    aggregation:
+      method: "weighted_vote"  # "vote", "weighted_vote", "confidence_max", "union"
+
+      # Voting parameters
+      voting:
+        min_votes: 1
+        tie_breaker: "confidence"
+
+      # Confidence-based parameters
+      confidence:
+        threshold: 0.5
+        calibration: true
+
+  # ---------------------------------------------------------------------------
+  # APPROACH 3: PIPELINE (SEGMENTATION → CLASSIFICATION → EXTRACTION)
+  # ---------------------------------------------------------------------------
+  pipeline:
+    enabled: true
+    name: "Multi-Stage Pipeline"
+    description: |
+      Three-stage pipeline:
+      1. Document segmentation: Identify relevant sections
+      2. Section classification: Classify which entity types are in each section
+      3. Entity extraction: Extract entities from classified sections
+
+    stages:
+      segmentation:
+        # Stage 1: Split document into meaningful sections
+        method: "semantic"  # "rule_based", "semantic", "model_based"
+
+        rule_based:
+          patterns:
+            - name: "numbered_section"
+              regex: "^\\d+\\.\\s+"
+            - name: "clause_header"
+              regex: "^CLÁUSULA\\s+\\w+"
+            - name: "article"
+              regex: "^ARTIGO\\s+\\w+"
+
+        semantic:
+          model: "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+          similarity_threshold: 0.6
+          min_segment_size: 100
+          max_segment_size: 2000
+
+        model_based:
+          model: "legal_bert"
+          checkpoint: "checkpoints/segmentation_model"
+          task: "sequence_classification"
+
+      classification:
+        # Stage 2: Classify sections by relevant entity types
+        model: "legal_bert"
+        checkpoint: "checkpoints/section_classifier"
+        task: "multi_label_classification"
+
+        # Section type labels
+        labels:
+          - "parties"
+          - "dates"
+          - "financial"
+          - "legal"
+          - "terms"
+          - "other"
+
+        threshold: 0.3  # Multi-label threshold
+
+      extraction:
+        # Stage 3: Extract entities from relevant sections
+        model: "legal_bert"
+        checkpoint: "checkpoints/ner_model"
+        task: "token_classification"
+
+        # Only process sections classified as relevant
+        filter_irrelevant: true
+
+    # Cross-stage features
+    cross_reference:
+      enabled: true
+      # Resolve entity references across sections
+      methods:
+        - "coreference_resolution"
+        - "entity_linking"
+
+  # ---------------------------------------------------------------------------
+  # APPROACH 4: ITERATIVE REFINEMENT
+  # ---------------------------------------------------------------------------
+  iterative_refinement:
+    enabled: true
+    name: "Iterative Refinement with Self-Verification"
+    description: |
+      Multi-pass approach:
+      1. Initial extraction with high recall
+      2. Self-verification to filter false positives
+      3. Gap detection to find missed entities
+      4. Final refinement
+
+    passes:
+      initial_extraction:
+        provider: "openai"
+        model: "gpt-4o"
+        temperature: 0.3  # Slightly higher for diversity
+        prompt_focus: "recall"  # Maximize recall
+
+      self_verification:
+        provider: "anthropic"
+        model: "claude-3-sonnet"
+        temperature: 0.0
+        prompt_template: |
+          Review these extractions and mark each as:
+          - VALID: Correct and complete
+          - INVALID: Incorrect or hallucinated
+          - PARTIAL: Correct but incomplete
+
+          Extractions: {extractions}
+          Document: {document}
+
+      gap_detection:
+        provider: "openai"
+        model: "gpt-4o"
+        temperature: 0.0
+        prompt_template: |
+          Given these validated entities, identify any MISSING entities:
+          Validated: {validated}
+          Entity types required: {entity_types}
+          Document: {document}
+
+      final_refinement:
+        merge_strategy: "union"
+        deduplication: true
+        confidence_threshold: 0.8
+
+# =============================================================================
+# EXPERIMENT VARIANTS (for ablation studies)
+# =============================================================================
+ablation:
+  rag_llm:
+    # Test different validation models
+    validation_models:
+      - provider: "openai"
+        model: "gpt-4o"
+      - provider: "anthropic"
+        model: "claude-3-sonnet"
+      - provider: "google"
+        model: "gemini-1.5-flash"
+
+    # Test different retrieval counts for RAG
+    retrieval_top_k:
+      - 5
+      - 10
+      - 15
+      - 20
+
+  ensemble:
+    # Test different aggregation methods
+    aggregation_methods:
+      - "vote"
+      - "weighted_vote"
+      - "confidence_max"
+      - "union"
+
+    # Test different model combinations
+    model_combinations:
+      - ["legal_bert"]  # Single model baseline
+      - ["legal_bert", "longformer"]
+      - ["legal_bert", "longformer", "bigbird"]
+      - ["party_extractor", "date_extractor", "clause_extractor"]
+
+  pipeline:
+    # Test with/without stages
+    stage_combinations:
+      - ["extraction"]  # Baseline
+      - ["segmentation", "extraction"]
+      - ["classification", "extraction"]
+      - ["segmentation", "classification", "extraction"]  # Full pipeline
+
+  iterative:
+    # Test number of refinement passes
+    num_passes:
+      - 1
+      - 2
+      - 3
