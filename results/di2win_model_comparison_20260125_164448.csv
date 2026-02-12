@@ -1,0 +1,5 @@
+Model,Type,Provider,Precision,Recall,F1,Support,Latency_Avg,Latency_Std,Num_Documents,Errors
+GPT-4o,llm,azure,0.2616,0.2218,0.2400,2268,19.99,7.36,47,0
+GPT-4-Turbo,llm,azure,0.2609,0.2112,0.2334,2268,41.36,22.09,47,0
+Gemini-2.0-Flash,llm,gemini,0.2707,0.1067,0.1531,2268,13.54,2.91,47,0
+RAG-GPT4o,rag,rag,0.3492,0.1001,0.1556,2268,5.08,2.24,47,0
